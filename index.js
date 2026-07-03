@@ -7,7 +7,7 @@ const { open } = require('sqlite');
 
 async function main() {
   const db = await open({
-    filename: './data/chat.db',
+    filename: '/usr/src/app/data/chat.db',
     driver: sqlite3.Database
   });
 
