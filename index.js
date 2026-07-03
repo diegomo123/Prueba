@@ -32,31 +32,36 @@ async function main() {
   });
 
   io.on('connection', async (socket) => {
-    socket.on('chat message', async (msg) => {
-      let result;
-      try {
-        // store the message in the database
-        result = await db.run('INSERT INTO messages (content) VALUES (?)', msg);
-      } catch (e) {
-        // TODO handle the failure
-        return;
-      }
-      // include the offset with the message
-      io.emit('chat message', msg, result.lastID);
-    });
-    if (!socket.recovered) {
-    // if the connection state recovery was not successful
-    try {
-      await db.each('SELECT id, content FROM messages WHERE id > ?',
-        [socket.handshake.auth.serverOffset || 0],
-        (_err, row) => {
-          socket.emit('chat message', row.content, row.id);
+    socket.on('chat message', async (msg, clientOffset, callback) => {
+        let result;
+        try {
+        result = await db.run('INSERT INTO messages (content, client_offset) VALUES (?, ?)', msg, clientOffset);
+        } catch (e) {
+        if (e.errno === 19 /* SQLITE_CONSTRAINT */ ) {
+            // the message was already inserted, so we notify the client
+            callback();
+        } else {
+            // nothing to do, just let the client retry
         }
-      )
-    } catch (e) {
-      // something went wrong
+        return;
+        }
+        io.emit('chat message', msg, result.lastID);
+        // acknowledge the event
+        if (typeof callback === 'function') callback();
+    });
+
+    if (!socket.recovered) {
+        try {
+        await db.each('SELECT id, content FROM messages WHERE id > ?',
+            [socket.handshake.auth.serverOffset || 0],
+            (_err, row) => {
+            socket.emit('chat message', row.content, row.id);
+            }
+        )
+        } catch (e) {
+        // something went wrong
+        }
     }
-  }
   });
 
   server.listen(3000, () => {
